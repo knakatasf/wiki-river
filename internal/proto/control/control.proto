@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package control;
+
+option go_package = "github.com/knakatasf/wiki-river/internal/proto/control;controlpb";
+
+enum StageKind {
+  STAGE_KIND_UNSPECIFIED = 0;
+  STAGE_KIND_SOURCE      = 1;
+  STAGE_KIND_FILTER      = 2;
+  STAGE_KIND_TOKENIZE    = 3;
+  STAGE_KIND_WCOUNT      = 4;
+  STAGE_KIND_SINK        = 5;
+}
+
+message Hello {
+  StageKind kind = 1;   // which stage this process implements
+  string    id   = 2;   // replica id (e.g., "W1")
+  string    addr = 3;   // listen address (host:port) of this worker
+}
+
+message Config {
+  string downstream_addr = 1; // where this worker should push to
+  // (Later you'll return routing tables, replica lists, etc.)
+}
+
+service Registry {
+  rpc Register(Hello) returns (Config);
+}

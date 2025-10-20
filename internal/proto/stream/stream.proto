@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package stream;
+
+option go_package = "github.com/knakatasf/wiki-river/internal/proto/stream;streampb";
+
+message Record {
+  int64   ts      = 1; // event timestamp
+  string  wiki    = 2;
+  string  title   = 3; // page title
+  string  comment = 4; // edit summary/comment
+  string  user    = 5; // editor username
+  bool    bot     = 6; // bot flag
+
+  // populated by Tokenize/WCount nodes
+  string  word    = 10; // tokenized word
+  int64   window_id = 11; // tumbling window id e.g. ts/12000
+  int64   count   = 12; // current aggregate for (window_id, wiki, word)
+
+  // internal routing/control
+  int64   epoch   = 20; // barrier id
+  int32   partition = 21; // partition id for routing
+}
+
+message Ack {
+  bool    ok     = 1;
+  string  reason = 2;
+}
+
+service Stage {
+  rpc Push(stream Record) returns (Ack);
+}

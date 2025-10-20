@@ -13,3 +13,9 @@ export PATH="$(go env GOPATH)/bin:$PATH"
 # Add runtime deps you’ll definitely use
 go get google.golang.org/grpc@latest
 go get google.golang.org/protobuf@latest
+
+# Make sure your codegen tools are installed and on PATH:
+# go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+# go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+make proto

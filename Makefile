@@ -1,6 +1,6 @@
 # ----- config
 PROTO_DIR := internal/proto
-PROTO_SRC := $(wildcard $(PROTO_DIR)/*.proto)
+PROTO_SRC := $(wildcard $(PROTO_DIR)/*/*.proto)
 
 # ----- tools
 GOBIN := $(shell go env GOPATH)/bin
