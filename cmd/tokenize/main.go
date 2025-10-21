@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	controlpb "github.com/knakatasf/wiki-river/internal/proto/control"
 	streampb "github.com/knakatasf/wiki-river/internal/proto/stream"
 	"google.golang.org/grpc"
 )
@@ -66,8 +67,9 @@ func main() {
 	}
 
 	id := flag.String("id", "T1", "replica ID")
-	addr := flag.String("addr", "7103", "listen address (host:port)")
-	down := flag.String("downstream", "127.0.0.1:7104", "downstream address (host:port)")
+	addr := flag.String("addr", ":7103", "listen address (host:port)")
+	downFlag := flag.String("downstream", "", "downstream address (host:port)")
+	controller := flag.String("controller", "127.0.0.1:7001", "controller address (optional; used to fetch downstream if --downstream is empty)")
 	flag.Parse()
 
 	// 1: Start gRPC server to accept upstream Push streams
@@ -79,17 +81,42 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen %s: %v", *addr, err)
 	}
-	log.Printf("[%-8s] id=%s listening=%s downstream=%s", role, *id, ln.Addr().String(), *down)
+	listenAddr := ln.Addr().String()
+
+	// Resolve downstream: prefer --downstream, otherwise ask controller
+	downstream := *downFlag
+	if downstream == "" && *controller != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ctrlConn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			log.Fatalf("failed to dial controller %s: %v", *controller, err)
+		}
+		defer ctrlConn.Close()
+
+		reg := controlpb.NewRegistryClient(ctrlConn)
+		cfg, err := reg.Register(context.Background(), &controlpb.Hello{
+			Kind: controlpb.StageKind_STAGE_KIND_TOKENIZE,
+			Id:   *id,
+			Addr: listenAddr,
+		})
+		if err != nil {
+			log.Fatalf("failed to register with controller: %v", err)
+		}
+		downstream = cfg.GetDownstreamAddr()
+	}
+
+	log.Printf("[%-8s] id=%s listening=%s downstream=%s", role, *id, listenAddr, downstream)
 
 	var client streampb.StageClient
 	var conn *grpc.ClientConn
 	var push streampb.Stage_PushClient
-	if *down != "" {
+	if downstream != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		conn, err = grpc.DialContext(ctx, *down, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err = grpc.DialContext(ctx, downstream, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
-			log.Fatalf("failed to dial downstream %s: %v", *down, err)
+			log.Fatalf("failed to dial downstream %s: %v", downstream, err)
 		}
 		client = streampb.NewStageClient(conn)
 
@@ -98,7 +125,7 @@ func main() {
 
 		push, err = client.Push(ctxPush) // client side stream
 		if err != nil {
-			log.Fatalf("failed to push downstream %s: %v", *down, err)
+			log.Fatalf("failed to push downstream %s: %v", downstream, err)
 		}
 		defer func() {
 			ack, cerr := push.CloseAndRecv()

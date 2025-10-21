@@ -1,29 +1,106 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
-	"os"
+	"sync"
+	"time"
+
+	"google.golang.org/grpc"
+
+	controlpb "github.com/knakatasf/wiki-river/internal/proto/control"
 )
 
+type registry struct {
+	mu   sync.RWMutex
+	data map[string]regEntry
+}
+type regEntry struct {
+	Kind controlpb.StageKind
+	ID   string
+	Addr string
+	Time time.Time
+}
+
+type server struct {
+	controlpb.UnimplementedRegistryServer
+
+	reg *registry
+
+	sourceNext   string // -> filter
+	filterNext   string // -> tokenize
+	tokenizeNext string // -> wcount
+	wcountNext   string // -> sink
+}
+
+func newServer(sourceNext, filterNext, tokenizeNext, wcountNext string) *server {
+	return &server{
+		reg:          &registry{data: make(map[string]regEntry)},
+		sourceNext:   sourceNext,
+		filterNext:   filterNext,
+		tokenizeNext: tokenizeNext,
+		wcountNext:   wcountNext,
+	}
+}
+
+func (s *server) Register(ctx context.Context, hello *controlpb.Hello) (*controlpb.Config, error) {
+	key := fmt.Sprintf("%s:%s", hello.GetKind().String(), hello.GetId())
+
+	s.reg.mu.Lock()
+	s.reg.data[key] = regEntry{
+		Kind: hello.GetKind(),
+		ID:   hello.GetId(),
+		Addr: hello.GetAddr(),
+		Time: time.Now(),
+	}
+	s.reg.mu.Unlock()
+
+	var downstream string
+	switch hello.GetKind() {
+	case controlpb.StageKind_STAGE_KIND_SOURCE:
+		downstream = s.sourceNext
+	case controlpb.StageKind_STAGE_KIND_FILTER:
+		downstream = s.filterNext
+	case controlpb.StageKind_STAGE_KIND_TOKENIZE:
+		downstream = s.tokenizeNext
+	case controlpb.StageKind_STAGE_KIND_WCOUNT:
+		downstream = s.wcountNext
+	case controlpb.StageKind_STAGE_KIND_SINK:
+		downstream = "" // terminal
+	default:
+		downstream = ""
+	}
+
+	log.Printf("[REG] %s id=%s addr=%s -> downstream=%s",
+		hello.GetKind().String(), hello.GetId(), hello.GetAddr(), downstream)
+
+	return &controlpb.Config{DownstreamAddr: downstream}, nil
+}
+
 func main() {
-	role := os.Getenv("ROLE") // optional, just for logging
-	addr := flag.String("addr", ":0", "listen address (host:port)")
-	down := flag.String("downstream", "", "downstream address (host:port)")
-	id := flag.String("id", "", "replica ID")
-	flag.Parse()
+	addr := flag.String("addr", ":7001", "controller listen address")
+	filterAddr := flag.String("filter-addr", "127.0.0.1:7102", "filter service address")
+	tokenizeAddr := flag.String("tokenize-addr", "127.0.0.1:7103", "tokenize service address")
+	wcountAddr := flag.String("wcount-addr", "127.0.0.1:7104", "wcount service address")
+	sinkAddr := flag.String("sink-addr", "127.0.0.1:7105", "sink service address")
 
-	if *id == "" {
-		*id = role
-	}
-	l, err := net.Listen("tcp", *addr)
+	s := newServer(*filterAddr, *tokenizeAddr, *wcountAddr, *sinkAddr)
+
+	gs := grpc.NewServer()
+	controlpb.RegisterRegistryServer(gs, s)
+
+	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
-		log.Fatalf("listen %s: %v", *addr, err)
+		log.Fatalf("controller listen %s: %v", *addr, err)
 	}
-	fmt.Printf("[%-9s] id=%s listening=%s downstream=%s\n", role, *id, l.Addr().String(), *down)
+	log.Printf("[CTRL] listening=%s", ln.Addr().String())
+	log.Printf("[CTRL] pipeline: source→%s → %s → %s → %s",
+		*filterAddr, *tokenizeAddr, *wcountAddr, *sinkAddr)
 
-	// For week-1 step 1 this is enough: process stays up so you can “go run”.
-	select {}
+	if err := gs.Serve(ln); err != nil {
+		log.Fatalf("grpc serve: %v", err)
+	}
 }

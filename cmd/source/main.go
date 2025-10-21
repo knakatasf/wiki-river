@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	controlpb "github.com/knakatasf/wiki-river/internal/proto/control"
 	streampb "github.com/knakatasf/wiki-river/internal/proto/stream"
 	"google.golang.org/grpc"
 )
@@ -31,29 +32,54 @@ func main() {
 	}
 
 	id := flag.String("id", "SRC", "replica ID")
-	down := flag.String("downstream", "127.0.0.1:7102", "downstream address (host:port)")
+	controller := flag.String("controller", "127.0.0.1:7001", "controller address (Registry). Empty to skip register")
+	down := flag.String("downstream", "", "downstream address (host:port)")
 	file := flag.String("file", "./data/wiki_sample.jsonl", "path to JSONL file to replay")
 	rate := flag.Int("rate", 0, "max records/sec (0 = unlimited)")
 	sleep := flag.Duration("sleep", 0, "fixed sleep between records (e.g., 10ms); ignored if --rate>0")
 	loop := flag.Bool("loop", false, "loop file when EOF")
 	flag.Parse()
 
-	if *down == "" {
-		log.Fatalf("--downstream is required")
+	// Resolve downstream: prefer --downstream; otherwise ask controller
+	downstream := *down
+	if downstream == "" && *controller != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ctrlConn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			log.Fatalf("dial controller %s: %v", *controller, err)
+		}
+		defer ctrlConn.Close()
+
+		reg := controlpb.NewRegistryClient(ctrlConn)
+		// Source has no listen addr; send a placeholder (e.g., "client")
+		cfg, err := reg.Register(context.Background(), &controlpb.Hello{
+			Kind: controlpb.StageKind_STAGE_KIND_SOURCE,
+			Id:   *id,
+			Addr: "client", // not serving; just identify ourselves
+		})
+		if err != nil {
+			log.Fatalf("register with controller: %v", err)
+		}
+		downstream = cfg.GetDownstreamAddr()
+	}
+
+	if downstream == "" {
+		log.Fatalf("no downstream resolved: set --downstream or provide --controller")
 	}
 
 	ctxDial, cancelDial := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelDial()
-	conn, err := grpc.DialContext(ctxDial, *down, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctxDial, downstream, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.Fatalf("dial downstream %s: %v", *down, err)
+		log.Fatalf("dial downstream %s: %v", downstream, err)
 	}
 	defer conn.Close()
 
 	client := streampb.NewStageClient(conn)
 
 	log.Printf("[%-6s] id=%s downstream=%s file=%s rate=%d/s sleep=%s loop=%v",
-		role, *id, *down, *file, *rate, sleep.String(), *loop)
+		role, *id, downstream, *file, *rate, sleep.String(), *loop)
 
 	sendOnce := func() (int, error) {
 		ctx := context.Background()
@@ -147,5 +173,4 @@ func main() {
 	}
 
 	log.Printf("[%-6s] DONE total_sent=%d", role, total)
-
 }

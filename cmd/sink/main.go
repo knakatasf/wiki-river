@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	controlpb "github.com/knakatasf/wiki-river/internal/proto/control"
 	streampb "github.com/knakatasf/wiki-river/internal/proto/stream"
 	"google.golang.org/grpc"
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO)
@@ -51,8 +52,9 @@ func main() {
 	}
 
 	id := flag.String("id", "S1", "replica ID")
-	addr := flag.String("addr", "7105", "listen address (host:port)")
+	addr := flag.String("addr", ":7105", "listen address (host:port)")
 	dbPath := flag.String("db", "results.db", "sqlite file path")
+	controller := flag.String("controller", "127.0.0.1:7001", "controller address (optional; used for registry only)")
 	flag.Parse()
 
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", *dbPath))
@@ -92,7 +94,33 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen %s: %v", *addr, err)
 	}
-	log.Printf("[%-6s] id=%s listening=%s db=%s", role, *id, ln.Addr().String(), *dbPath)
+	listenAddr := ln.Addr().String()
+
+	// Register with controller (optional; sink has no downstream, but useful for visibility/registry)
+	if *controller != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ctrlConn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			log.Fatalf("dial controller %s: %v", *controller, err)
+		}
+		defer ctrlConn.Close()
+
+		reg := controlpb.NewRegistryClient(ctrlConn)
+		cfg, err := reg.Register(context.Background(), &controlpb.Hello{
+			Kind: controlpb.StageKind_STAGE_KIND_SINK,
+			Id:   *id,
+			Addr: listenAddr,
+		})
+		if err != nil {
+			log.Fatalf("register with controller: %v", err)
+		}
+		// cfg.DownstreamAddr is expected to be empty for sink.
+		log.Printf("[REG   ] sink registered id=%s addr=%s controller=%s downstream=%q",
+			*id, listenAddr, *controller, cfg.GetDownstreamAddr())
+	}
+
+	log.Printf("[%-6s] id=%s listening=%s db=%s", role, *id, listenAddr, *dbPath)
 
 	// goroutine for
 	go func() {
