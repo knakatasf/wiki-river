@@ -51,7 +51,7 @@ func operatorFn(rec *streampb.Record) []*streampb.Record {
 func main() {
 	role := strings.ToUpper(os.Getenv("ROLE"))
 	if role == "" {
-		role = "FILETER"
+		role = "FILTER"
 	}
 
 	id := flag.String("id", "F1", "replica ID")
@@ -114,6 +114,7 @@ func main() {
 		}
 	}()
 
+	// goroutine B: process data by operatorFn() and forward
 	for rec := range srv.inCh {
 		out := operatorFn(rec)
 		if push == nil {
