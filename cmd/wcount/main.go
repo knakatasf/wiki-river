@@ -61,7 +61,7 @@ func main() {
 	// 1: Start gRPC server to accept upstream Push streams
 	srv := newStageServer()
 	gs := grpc.NewServer()
-	streampb.RegisterStageServer(gs, srv)
+	streampb.RegisterStageServer(gs, srv) // now gs is the receiver of messages from upstream
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -85,7 +85,7 @@ func main() {
 			Kind: controlpb.StageKind_STAGE_KIND_WCOUNT,
 			Id:   *id,
 			Addr: listenAddr,
-		})
+		}) // this invokes gRPC's protobuf's Registry method -> indirectly calls server's Register function through its gs.Serve()
 		if err != nil {
 			log.Fatalf("failed to register with controller: %v", err)
 		}
@@ -131,7 +131,7 @@ func main() {
 	//	- goroutine B: read from srv.inCh, apply operatorFn, send results to downstream
 	// Backpressure: if downstream is slow, push.Send will block; plus inCh is bounded
 
-	// goroutine A: serve gRPC
+	// goroutine A: serve gRPC; receiving messages from upstream
 	go func() {
 		if err := gs.Serve(ln); err != nil {
 			log.Fatalf("failed to serve: %v", err)

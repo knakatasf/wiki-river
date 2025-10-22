@@ -30,6 +30,7 @@ type server struct {
 
 	reg *registry
 
+	// hard coding for now
 	sourceNext   string // -> filter
 	filterNext   string // -> tokenize
 	tokenizeNext string // -> wcount
@@ -90,7 +91,8 @@ func main() {
 	s := newServer(*filterAddr, *tokenizeAddr, *wcountAddr, *sinkAddr)
 
 	gs := grpc.NewServer()
-	controlpb.RegisterRegistryServer(gs, s)
+	controlpb.RegisterRegistryServer(gs, s) // stub the instantiated controller server into the new grpc.NewServer()
+	// so, we want to use gs for later
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -100,7 +102,9 @@ func main() {
 	log.Printf("[CTRL] pipeline: source→%s → %s → %s → %s",
 		*filterAddr, *tokenizeAddr, *wcountAddr, *sinkAddr)
 
-	if err := gs.Serve(ln); err != nil {
+	if err :=
+		gs.Serve(ln); err != nil { // when receiving a gRPC request from worker node (client), and it looks at service = Registry, method = Register
+		// and then, it invokes registered handler (s *server)'s Register method defined in this file
 		log.Fatalf("grpc serve: %v", err)
 	}
 }

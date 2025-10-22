@@ -39,7 +39,7 @@ tokenize:
 ROLE=TOKENIZE go run ./cmd/tokenize --addr=:7103 --controller=127.0.0.1:7001
 
 wcount:
-ROLE=WCOUNT   go run ./cmd/wcount   --addr=:7104 --controller=127.0.0.1:7001
+ROLE=WCOUNT go run ./cmd/wcount   --addr=:7104 --controller=127.0.0.1:7001
 
 sink:
 ROLE=SINK go run ./cmd/sink --addr=:7105 --controller=127.0.0.1:7001 --db=results.db
