@@ -119,3 +119,109 @@ var Registry_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "control/control.proto",
 }
+
+const (
+	Worker_ReceiveBarrier_FullMethodName = "/control.Worker/ReceiveBarrier"
+)
+
+// WorkerClient is the client API for Worker service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// source node listens on this to receive the signal: inject a barrier now
+type WorkerClient interface {
+	ReceiveBarrier(ctx context.Context, in *Barrier, opts ...grpc.CallOption) (*Empty, error)
+}
+
+type workerClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewWorkerClient(cc grpc.ClientConnInterface) WorkerClient {
+	return &workerClient{cc}
+}
+
+func (c *workerClient) ReceiveBarrier(ctx context.Context, in *Barrier, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, Worker_ReceiveBarrier_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// WorkerServer is the server API for Worker service.
+// All implementations must embed UnimplementedWorkerServer
+// for forward compatibility.
+//
+// source node listens on this to receive the signal: inject a barrier now
+type WorkerServer interface {
+	ReceiveBarrier(context.Context, *Barrier) (*Empty, error)
+	mustEmbedUnimplementedWorkerServer()
+}
+
+// UnimplementedWorkerServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedWorkerServer struct{}
+
+func (UnimplementedWorkerServer) ReceiveBarrier(context.Context, *Barrier) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReceiveBarrier not implemented")
+}
+func (UnimplementedWorkerServer) mustEmbedUnimplementedWorkerServer() {}
+func (UnimplementedWorkerServer) testEmbeddedByValue()                {}
+
+// UnsafeWorkerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to WorkerServer will
+// result in compilation errors.
+type UnsafeWorkerServer interface {
+	mustEmbedUnimplementedWorkerServer()
+}
+
+func RegisterWorkerServer(s grpc.ServiceRegistrar, srv WorkerServer) {
+	// If the following call pancis, it indicates UnimplementedWorkerServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Worker_ServiceDesc, srv)
+}
+
+func _Worker_ReceiveBarrier_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Barrier)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkerServer).ReceiveBarrier(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Worker_ReceiveBarrier_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkerServer).ReceiveBarrier(ctx, req.(*Barrier))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// Worker_ServiceDesc is the grpc.ServiceDesc for Worker service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Worker_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "control.Worker",
+	HandlerType: (*WorkerServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ReceiveBarrier",
+			Handler:    _Worker_ReceiveBarrier_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "control/control.proto",
+}

@@ -24,6 +24,15 @@ message Config {
   // (Later you'll return routing tables, replica lists, etc.)
 }
 
+message Barrier { int64 epoch = 1; }
+message Ack     { string stage = 1; string id = 2; int64 epoch = 3; }
+message Empty   {}
+
 service Registry {
   rpc Register(Hello) returns (Config);
+}
+
+// source node listens on this to receive the signal: inject a barrier now
+service Worker {
+  rpc ReceiveBarrier(Barrier) returns (Empty);
 }

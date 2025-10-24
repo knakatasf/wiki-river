@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	controlpb "github.com/knakatasf/wiki-river/internal/proto/control"
@@ -22,6 +23,17 @@ type stageServer struct {
 
 	inCh chan *streampb.Record // receives from upstream via gRPC stream
 }
+
+type wcKey struct {
+	Win  int64
+	Wiki string
+	Word string
+}
+
+var (
+	wcMu  sync.Mutex
+	wcMap = make(map[wcKey]int64)
+)
 
 func newStageServer() *stageServer {
 	return &stageServer{inCh: make(chan *streampb.Record, queueCap)}
@@ -43,7 +55,22 @@ func (s *stageServer) Push(stream streampb.Stage_PushServer) error {
 }
 
 func operatorFn(rec *streampb.Record) []*streampb.Record {
-	return []*streampb.Record{rec}
+	if rec.Word == "" {
+		return nil
+	}
+
+	win := rec.GetTs() / 60000 // windowed count, refresh the count every 60 secs
+	k := wcKey{Win: win, Wiki: rec.GetWiki(), Word: rec.GetWord()}
+
+	wcMu.Lock()
+	wcMap[k]++
+	c := wcMap[k]
+	wcMu.Unlock()
+
+	out := *rec
+	out.WindowId = win
+	out.Count = c
+	return []*streampb.Record{&out}
 }
 
 func main() {

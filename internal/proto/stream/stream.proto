@@ -20,6 +20,8 @@ message Record {
   // internal routing/control
   int64   epoch   = 20; // barrier id
   int32   partition = 21; // partition id for routing
+
+  bool   is_barrier = 30; // travels from source to sink
 }
 
 message Ack {
