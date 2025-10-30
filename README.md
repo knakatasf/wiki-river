@@ -30,7 +30,10 @@ go run ./cmd/controller --addr=:7001 \
 --sink-addr=127.0.0.1:7105
 
 source:
-ROLE=SOURCE go run ./cmd/source --controller=127.0.0.1:7001 --file=./data/wiki_sample.jsonl --rate=20
+ROLE=SOURCE go run ./cmd/source \
+--controller=127.0.0.1:7001 \
+--sse-url=https://stream.wikimedia.org/v2/stream/recentchange \
+--wiki=enwiki
 
 filter:
 ROLE=FILTER go run ./cmd/filter --addr=:7102 --controller=127.0.0.1:7001
@@ -43,3 +46,14 @@ ROLE=WCOUNT go run ./cmd/wcount   --addr=:7104 --controller=127.0.0.1:7001
 
 sink:
 ROLE=SINK go run ./cmd/sink --addr=:7105 --controller=127.0.0.1:7001 --db=results.db
+
+sqlite:
+sqlite3 results.db
+DELETE FROM word_counts;
+VACUUM;
+.exit
+
+SELECT window_id, wiki, word, count
+FROM word_counts
+ORDER BY count DESC
+LIMIT 20;

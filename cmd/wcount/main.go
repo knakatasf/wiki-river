@@ -59,7 +59,7 @@ func operatorFn(rec *streampb.Record) []*streampb.Record {
 		return nil
 	}
 
-	win := rec.GetTs() / 60000 // windowed count, refresh the count every 60 secs
+	win := rec.GetTs() / 600000 // windowed count, refresh the count every 10 mins
 	k := wcKey{Win: win, Wiki: rec.GetWiki(), Word: rec.GetWord()}
 
 	wcMu.Lock()
