@@ -229,9 +229,8 @@ func (x *Barrier) GetEpoch() int64 {
 
 type Ack struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stage         string                 `protobuf:"bytes,1,opt,name=stage,proto3" json:"stage,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	Epoch         int64                  `protobuf:"varint,3,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -266,61 +265,18 @@ func (*Ack) Descriptor() ([]byte, []int) {
 	return file_control_control_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *Ack) GetStage() string {
+func (x *Ack) GetOk() bool {
 	if x != nil {
-		return x.Stage
+		return x.Ok
+	}
+	return false
+}
+
+func (x *Ack) GetReason() string {
+	if x != nil {
+		return x.Reason
 	}
 	return ""
-}
-
-func (x *Ack) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *Ack) GetEpoch() int64 {
-	if x != nil {
-		return x.Epoch
-	}
-	return 0
-}
-
-type Empty struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Empty) Reset() {
-	*x = Empty{}
-	mi := &file_control_control_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Empty) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Empty) ProtoMessage() {}
-
-func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_control_control_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Empty.ProtoReflect.Descriptor instead.
-func (*Empty) Descriptor() ([]byte, []int) {
-	return file_control_control_proto_rawDescGZIP(), []int{4}
 }
 
 var File_control_control_proto protoreflect.FileDescriptor
@@ -335,12 +291,10 @@ const file_control_control_proto_rawDesc = "" +
 	"\x06Config\x12'\n" +
 	"\x0fdownstream_addr\x18\x01 \x01(\tR\x0edownstreamAddr\"\x1f\n" +
 	"\aBarrier\x12\x14\n" +
-	"\x05epoch\x18\x01 \x01(\x03R\x05epoch\"A\n" +
-	"\x03Ack\x12\x14\n" +
-	"\x05stage\x18\x01 \x01(\tR\x05stage\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\x12\x14\n" +
-	"\x05epoch\x18\x03 \x01(\x03R\x05epoch\"\a\n" +
-	"\x05Empty*\x9a\x01\n" +
+	"\x05epoch\x18\x01 \x01(\x03R\x05epoch\"-\n" +
+	"\x03Ack\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason*\x9a\x01\n" +
 	"\tStageKind\x12\x1a\n" +
 	"\x16STAGE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11STAGE_KIND_SOURCE\x10\x01\x12\x15\n" +
@@ -349,9 +303,9 @@ const file_control_control_proto_rawDesc = "" +
 	"\x11STAGE_KIND_WCOUNT\x10\x04\x12\x13\n" +
 	"\x0fSTAGE_KIND_SINK\x10\x0527\n" +
 	"\bRegistry\x12+\n" +
-	"\bRegister\x12\x0e.control.Hello\x1a\x0f.control.Config2<\n" +
-	"\x06Worker\x122\n" +
-	"\x0eReceiveBarrier\x12\x10.control.Barrier\x1a\x0e.control.EmptyBBZ@github.com/knakatasf/wiki-river/internal/proto/control;controlpbb\x06proto3"
+	"\bRegister\x12\x0e.control.Hello\x1a\x0f.control.Config2:\n" +
+	"\x06Worker\x120\n" +
+	"\x0eReceiveBarrier\x12\x10.control.Barrier\x1a\f.control.AckBBZ@github.com/knakatasf/wiki-river/internal/proto/control;controlpbb\x06proto3"
 
 var (
 	file_control_control_proto_rawDescOnce sync.Once
@@ -366,21 +320,20 @@ func file_control_control_proto_rawDescGZIP() []byte {
 }
 
 var file_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_control_control_proto_goTypes = []any{
 	(StageKind)(0),  // 0: control.StageKind
 	(*Hello)(nil),   // 1: control.Hello
 	(*Config)(nil),  // 2: control.Config
 	(*Barrier)(nil), // 3: control.Barrier
 	(*Ack)(nil),     // 4: control.Ack
-	(*Empty)(nil),   // 5: control.Empty
 }
 var file_control_control_proto_depIdxs = []int32{
 	0, // 0: control.Hello.kind:type_name -> control.StageKind
 	1, // 1: control.Registry.Register:input_type -> control.Hello
 	3, // 2: control.Worker.ReceiveBarrier:input_type -> control.Barrier
 	2, // 3: control.Registry.Register:output_type -> control.Config
-	5, // 4: control.Worker.ReceiveBarrier:output_type -> control.Empty
+	4, // 4: control.Worker.ReceiveBarrier:output_type -> control.Ack
 	3, // [3:5] is the sub-list for method output_type
 	1, // [1:3] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -399,7 +352,7 @@ func file_control_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_control_control_proto_rawDesc), len(file_control_control_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

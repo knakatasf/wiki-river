@@ -30,13 +30,11 @@ type Record struct {
 	User    string                 `protobuf:"bytes,5,opt,name=user,proto3" json:"user,omitempty"`       // editor username
 	Bot     bool                   `protobuf:"varint,6,opt,name=bot,proto3" json:"bot,omitempty"`        // bot flag
 	// populated by Tokenize/WCount nodes
-	Word     string `protobuf:"bytes,10,opt,name=word,proto3" json:"word,omitempty"`                          // tokenized word
-	WindowId int64  `protobuf:"varint,11,opt,name=window_id,json=windowId,proto3" json:"window_id,omitempty"` // tumbling window id e.g. ts/12000
-	Count    int64  `protobuf:"varint,12,opt,name=count,proto3" json:"count,omitempty"`                       // current aggregate for (window_id, wiki, word)
-	// internal routing/control
-	Epoch         int64 `protobuf:"varint,20,opt,name=epoch,proto3" json:"epoch,omitempty"`                          // barrier id
-	Partition     int32 `protobuf:"varint,21,opt,name=partition,proto3" json:"partition,omitempty"`                  // partition id for routing
-	IsBarrier     bool  `protobuf:"varint,30,opt,name=is_barrier,json=isBarrier,proto3" json:"is_barrier,omitempty"` // travels from source to sink
+	Word          string `protobuf:"bytes,10,opt,name=word,proto3" json:"word,omitempty"`                             // tokenized word
+	WindowId      int64  `protobuf:"varint,11,opt,name=window_id,json=windowId,proto3" json:"window_id,omitempty"`    // tumbling window id e.g. ts/12000
+	Count         int64  `protobuf:"varint,12,opt,name=count,proto3" json:"count,omitempty"`                          // current aggregate for (window_id, wiki, word)
+	IsBarrier     bool   `protobuf:"varint,30,opt,name=is_barrier,json=isBarrier,proto3" json:"is_barrier,omitempty"` // travels from source to sink
+	Epoch         int64  `protobuf:"varint,35,opt,name=epoch,proto3" json:"epoch,omitempty"`                          // barrier id
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -134,25 +132,18 @@ func (x *Record) GetCount() int64 {
 	return 0
 }
 
-func (x *Record) GetEpoch() int64 {
-	if x != nil {
-		return x.Epoch
-	}
-	return 0
-}
-
-func (x *Record) GetPartition() int32 {
-	if x != nil {
-		return x.Partition
-	}
-	return 0
-}
-
 func (x *Record) GetIsBarrier() bool {
 	if x != nil {
 		return x.IsBarrier
 	}
 	return false
+}
+
+func (x *Record) GetEpoch() int64 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
 }
 
 type Ack struct {
@@ -211,7 +202,7 @@ var File_stream_stream_proto protoreflect.FileDescriptor
 
 const file_stream_stream_proto_rawDesc = "" +
 	"\n" +
-	"\x13stream/stream.proto\x12\x06stream\"\x9c\x02\n" +
+	"\x13stream/stream.proto\x12\x06stream\"\xfe\x01\n" +
 	"\x06Record\x12\x0e\n" +
 	"\x02ts\x18\x01 \x01(\x03R\x02ts\x12\x12\n" +
 	"\x04wiki\x18\x02 \x01(\tR\x04wiki\x12\x14\n" +
@@ -222,11 +213,10 @@ const file_stream_stream_proto_rawDesc = "" +
 	"\x04word\x18\n" +
 	" \x01(\tR\x04word\x12\x1b\n" +
 	"\twindow_id\x18\v \x01(\x03R\bwindowId\x12\x14\n" +
-	"\x05count\x18\f \x01(\x03R\x05count\x12\x14\n" +
-	"\x05epoch\x18\x14 \x01(\x03R\x05epoch\x12\x1c\n" +
-	"\tpartition\x18\x15 \x01(\x05R\tpartition\x12\x1d\n" +
+	"\x05count\x18\f \x01(\x03R\x05count\x12\x1d\n" +
 	"\n" +
-	"is_barrier\x18\x1e \x01(\bR\tisBarrier\"-\n" +
+	"is_barrier\x18\x1e \x01(\bR\tisBarrier\x12\x14\n" +
+	"\x05epoch\x18# \x01(\x03R\x05epoch\"-\n" +
 	"\x03Ack\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason2.\n" +

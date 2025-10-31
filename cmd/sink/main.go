@@ -139,6 +139,10 @@ func main() {
 		select {
 		case rec := <-srv.inCh:
 			win := rec.GetWindowId()
+			if rec.GetIsBarrier() {
+				log.Printf("[%-8s] id=%s barrier seen epoch=%d", role, *id, rec.GetEpoch())
+				continue
+			}
 			if win == 0 && rec.GetTs() > 0 {
 				win = rec.GetTs() / 60000 // 60s tumbling by event-time
 			}

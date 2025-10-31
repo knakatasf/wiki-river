@@ -154,6 +154,15 @@ func main() {
 
 	// goroutine B: process data by operatorFn() and forward
 	for rec := range srv.inCh {
+		if rec.GetIsBarrier() {
+			log.Printf("[%-8s] id=%s barrier seen epoch=%d", role, *id, rec.GetEpoch())
+			if push != nil {
+				if err := push.Send(rec); err != nil {
+					log.Fatalf("failed to forward barrier: %v", err)
+				}
+			}
+			continue
+		}
 		out := operatorFn(rec)
 		if push == nil {
 			continue

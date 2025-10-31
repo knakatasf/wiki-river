@@ -13,15 +13,15 @@ message Record {
   bool    bot     = 6; // bot flag
 
   // populated by Tokenize/WCount nodes
-  string  word    = 10; // tokenized word
+  string  word      = 10; // tokenized word
   int64   window_id = 11; // tumbling window id e.g. ts/12000
-  int64   count   = 12; // current aggregate for (window_id, wiki, word)
+  int64   count     = 12; // current aggregate for (window_id, wiki, word)
 
   // internal routing/control
-  int64   epoch   = 20; // barrier id
-  int32   partition = 21; // partition id for routing
+
 
   bool   is_barrier = 30; // travels from source to sink
+  int64  epoch      = 35; // barrier id
 }
 
 message Ack {

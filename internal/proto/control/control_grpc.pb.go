@@ -130,7 +130,7 @@ const (
 //
 // source node listens on this to receive the signal: inject a barrier now
 type WorkerClient interface {
-	ReceiveBarrier(ctx context.Context, in *Barrier, opts ...grpc.CallOption) (*Empty, error)
+	ReceiveBarrier(ctx context.Context, in *Barrier, opts ...grpc.CallOption) (*Ack, error)
 }
 
 type workerClient struct {
@@ -141,9 +141,9 @@ func NewWorkerClient(cc grpc.ClientConnInterface) WorkerClient {
 	return &workerClient{cc}
 }
 
-func (c *workerClient) ReceiveBarrier(ctx context.Context, in *Barrier, opts ...grpc.CallOption) (*Empty, error) {
+func (c *workerClient) ReceiveBarrier(ctx context.Context, in *Barrier, opts ...grpc.CallOption) (*Ack, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Empty)
+	out := new(Ack)
 	err := c.cc.Invoke(ctx, Worker_ReceiveBarrier_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -157,7 +157,7 @@ func (c *workerClient) ReceiveBarrier(ctx context.Context, in *Barrier, opts ...
 //
 // source node listens on this to receive the signal: inject a barrier now
 type WorkerServer interface {
-	ReceiveBarrier(context.Context, *Barrier) (*Empty, error)
+	ReceiveBarrier(context.Context, *Barrier) (*Ack, error)
 	mustEmbedUnimplementedWorkerServer()
 }
 
@@ -168,7 +168,7 @@ type WorkerServer interface {
 // pointer dereference when methods are called.
 type UnimplementedWorkerServer struct{}
 
-func (UnimplementedWorkerServer) ReceiveBarrier(context.Context, *Barrier) (*Empty, error) {
+func (UnimplementedWorkerServer) ReceiveBarrier(context.Context, *Barrier) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReceiveBarrier not implemented")
 }
 func (UnimplementedWorkerServer) mustEmbedUnimplementedWorkerServer() {}
