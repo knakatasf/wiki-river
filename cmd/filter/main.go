@@ -75,18 +75,25 @@ func main() {
 
 	// 2: Resolve downstream
 	downstream := *downFlag
-	if downstream == "" && *controller != "" {
-		// Register with controller if downstream not explicitly set
+
+	// Connect with the controller for barrier-ack communication
+	// (We reuse this same connection for Register and later AckBarrier calls.)
+	var ctrl controlpb.RegistryClient
+	var ctrlConn *grpc.ClientConn
+	if *controller != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		ctrlConn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
+		cconn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			log.Fatalf("failed to dial controller %s: %v", *controller, err)
 		}
-		defer ctrlConn.Close()
+		ctrlConn = cconn
+		ctrl = controlpb.NewRegistryClient(ctrlConn)
+	}
 
-		reg := controlpb.NewRegistryClient(ctrlConn)
-		cfg, err := reg.Register(context.Background(), &controlpb.Hello{
+	if downstream == "" && ctrl != nil {
+		// Register with controller if downstream not explicitly set
+		cfg, err := ctrl.Register(context.Background(), &controlpb.Hello{
 			Kind: controlpb.StageKind_STAGE_KIND_FILTER,
 			Id:   *id,
 			Addr: listenAddr,
@@ -134,6 +141,9 @@ func main() {
 			if conn != nil {
 				_ = conn.Close()
 			}
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
 		}()
 	}
 
@@ -153,13 +163,25 @@ func main() {
 	for rec := range srv.inCh {
 		if rec.GetIsBarrier() {
 			log.Printf("[%-8s] id=%s barrier seen epoch=%d", role, *id, rec.GetEpoch())
+
+			// anyway, forward barrier downstream if exists
 			if push != nil {
 				if err := push.Send(rec); err != nil {
 					log.Fatalf("failed to forward barrier: %v", err)
 				}
 			}
+
+			// send ack to controller (best-effort)
+			if ctrl != nil {
+				_, _ = ctrl.AckBarrier(context.Background(), &controlpb.AckBarrierReq{
+					Kind:  controlpb.StageKind_STAGE_KIND_FILTER,
+					Id:    *id,
+					Epoch: rec.GetEpoch(),
+				})
+			}
 			continue
 		}
+
 		out := operatorFn(rec)
 		if push == nil {
 			continue

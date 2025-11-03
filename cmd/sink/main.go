@@ -15,7 +15,7 @@ import (
 	controlpb "github.com/knakatasf/wiki-river/internal/proto/control"
 	streampb "github.com/knakatasf/wiki-river/internal/proto/stream"
 	"google.golang.org/grpc"
-	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO)
+	_ "modernc.org/sqlite"
 )
 
 const queueCap = 1000 // backpressure: bounded queue
@@ -97,17 +97,20 @@ func main() {
 	listenAddr := ln.Addr().String()
 
 	// Register with controller (optional; sink has no downstream, but useful for visibility/registry)
+	// NOTE: We keep the controller connection open so we can also AckBarrier later.
+	var ctrl controlpb.RegistryClient
+	var ctrlConn *grpc.ClientConn
 	if *controller != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		ctrlConn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
+		cconn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			log.Fatalf("dial controller %s: %v", *controller, err)
 		}
-		defer ctrlConn.Close()
+		ctrlConn = cconn
+		ctrl = controlpb.NewRegistryClient(ctrlConn)
 
-		reg := controlpb.NewRegistryClient(ctrlConn)
-		cfg, err := reg.Register(context.Background(), &controlpb.Hello{
+		cfg, err := ctrl.Register(context.Background(), &controlpb.Hello{
 			Kind: controlpb.StageKind_STAGE_KIND_SINK,
 			Id:   *id,
 			Addr: listenAddr,
@@ -118,6 +121,12 @@ func main() {
 		// cfg.DownstreamAddr is expected to be empty for sink.
 		log.Printf("[REG   ] sink registered id=%s addr=%s controller=%s downstream=%q",
 			*id, listenAddr, *controller, cfg.GetDownstreamAddr())
+		// ctrlConn is intentionally NOT closed here; we reuse it below for AckBarrier.
+		defer func() {
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
+		}()
 	}
 
 	log.Printf("[%-6s] id=%s listening=%s db=%s", role, *id, listenAddr, *dbPath)
@@ -141,6 +150,14 @@ func main() {
 			win := rec.GetWindowId()
 			if rec.GetIsBarrier() {
 				log.Printf("[%-8s] id=%s barrier seen epoch=%d", role, *id, rec.GetEpoch())
+				// Best-effort ack to controller so epoch can complete.
+				if ctrl != nil {
+					_, _ = ctrl.AckBarrier(context.Background(), &controlpb.AckBarrierReq{
+						Kind:  controlpb.StageKind_STAGE_KIND_SINK,
+						Id:    *id,
+						Epoch: rec.GetEpoch(),
+					})
+				}
 				continue
 			}
 			if win == 0 && rec.GetTs() > 0 {

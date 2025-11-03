@@ -98,17 +98,23 @@ func main() {
 
 	// Resolve downstream: prefer --downstream, otherwise ask controller
 	downstream := *downFlag
-	if downstream == "" && *controller != "" {
+
+	// Reuse a single controller connection (for Register and AckBarrier)
+	var ctrl controlpb.RegistryClient
+	var ctrlConn *grpc.ClientConn
+	if *controller != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		ctrlConn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
+		cconn, err := grpc.DialContext(ctx, *controller, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			log.Fatalf("failed to dial controller %s: %v", *controller, err)
 		}
-		defer ctrlConn.Close()
+		ctrlConn = cconn
+		ctrl = controlpb.NewRegistryClient(ctrlConn)
+	}
 
-		reg := controlpb.NewRegistryClient(ctrlConn)
-		cfg, err := reg.Register(context.Background(), &controlpb.Hello{
+	if downstream == "" && ctrl != nil {
+		cfg, err := ctrl.Register(context.Background(), &controlpb.Hello{
 			Kind: controlpb.StageKind_STAGE_KIND_WCOUNT,
 			Id:   *id,
 			Addr: listenAddr,
@@ -119,7 +125,11 @@ func main() {
 		downstream = cfg.GetDownstreamAddr()
 	}
 
-	log.Printf("[%-8s] id=%s listening=%s downstream=%s", role, *id, listenAddr, downstream)
+	if downstream == "" {
+		log.Fatalf("no downstream resolved: set --downstream or provide --controller")
+	}
+
+	log.Printf("[%-8s] id=%s listening=%s downstream=%s controller=%s", role, *id, listenAddr, downstream, *controller)
 
 	var client streampb.StageClient
 	var conn *grpc.ClientConn
@@ -150,6 +160,9 @@ func main() {
 			if conn != nil {
 				_ = conn.Close()
 			}
+			if ctrlConn != nil {
+				_ = ctrlConn.Close()
+			}
 		}()
 	}
 
@@ -173,6 +186,14 @@ func main() {
 				if err := push.Send(rec); err != nil {
 					log.Fatalf("failed to forward barrier: %v", err)
 				}
+			}
+			// best-effort ack to controller to match FILTER/TOKENIZE behavior
+			if ctrl != nil {
+				_, _ = ctrl.AckBarrier(context.Background(), &controlpb.AckBarrierReq{
+					Kind:  controlpb.StageKind_STAGE_KIND_WCOUNT,
+					Id:    *id,
+					Epoch: rec.GetEpoch(),
+				})
 			}
 			continue
 		}

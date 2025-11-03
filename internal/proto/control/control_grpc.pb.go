@@ -19,14 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Registry_Register_FullMethodName = "/control.Registry/Register"
+	Registry_Register_FullMethodName   = "/control.Registry/Register"
+	Registry_AckBarrier_FullMethodName = "/control.Registry/AckBarrier"
 )
 
 // RegistryClient is the client API for Registry service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Single req -> single res pattern
 type RegistryClient interface {
 	Register(ctx context.Context, in *Hello, opts ...grpc.CallOption) (*Config, error)
+	AckBarrier(ctx context.Context, in *AckBarrierReq, opts ...grpc.CallOption) (*AckBarrierResp, error)
 }
 
 type registryClient struct {
@@ -47,11 +51,24 @@ func (c *registryClient) Register(ctx context.Context, in *Hello, opts ...grpc.C
 	return out, nil
 }
 
+func (c *registryClient) AckBarrier(ctx context.Context, in *AckBarrierReq, opts ...grpc.CallOption) (*AckBarrierResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AckBarrierResp)
+	err := c.cc.Invoke(ctx, Registry_AckBarrier_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RegistryServer is the server API for Registry service.
 // All implementations must embed UnimplementedRegistryServer
 // for forward compatibility.
+//
+// Single req -> single res pattern
 type RegistryServer interface {
 	Register(context.Context, *Hello) (*Config, error)
+	AckBarrier(context.Context, *AckBarrierReq) (*AckBarrierResp, error)
 	mustEmbedUnimplementedRegistryServer()
 }
 
@@ -64,6 +81,9 @@ type UnimplementedRegistryServer struct{}
 
 func (UnimplementedRegistryServer) Register(context.Context, *Hello) (*Config, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
+}
+func (UnimplementedRegistryServer) AckBarrier(context.Context, *AckBarrierReq) (*AckBarrierResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AckBarrier not implemented")
 }
 func (UnimplementedRegistryServer) mustEmbedUnimplementedRegistryServer() {}
 func (UnimplementedRegistryServer) testEmbeddedByValue()                  {}
@@ -104,6 +124,24 @@ func _Registry_Register_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Registry_AckBarrier_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AckBarrierReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RegistryServer).AckBarrier(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Registry_AckBarrier_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RegistryServer).AckBarrier(ctx, req.(*AckBarrierReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Registry_ServiceDesc is the grpc.ServiceDesc for Registry service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +152,10 @@ var Registry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Register",
 			Handler:    _Registry_Register_Handler,
+		},
+		{
+			MethodName: "AckBarrier",
+			Handler:    _Registry_AckBarrier_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

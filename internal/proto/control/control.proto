@@ -20,18 +20,24 @@ message Hello {
 }
 
 message Config {
-  string downstream_addr = 1; // where this worker should push to
-  // (Later you'll return routing tables, replica lists, etc.)
+  string downstream_addr = 1;
 }
 
 message Barrier { int64 epoch = 1; }
 message Ack { bool ok = 1; string reason = 2; }
 
+message AckBarrierReq  { StageKind kind = 1; string id = 2; int64 epoch = 3; }
+message AckBarrierResp { bool ok = 1; }
+
+// Single req -> single res pattern
 service Registry {
   rpc Register(Hello) returns (Config);
+  rpc AckBarrier(AckBarrierReq) returns (AckBarrierResp);
 }
 
-// source node listens on this to receive the signal: inject a barrier now
+// client: controller -> server: source node
+// controller calls ReceiveBarrier(Barrier) -> actually it sends
+// and then, source node receives the barrier, returns ack
 service Worker {
   rpc ReceiveBarrier(Barrier) returns (Ack);
 }

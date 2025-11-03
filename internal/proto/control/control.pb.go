@@ -141,7 +141,7 @@ func (x *Hello) GetAddr() string {
 
 type Config struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	DownstreamAddr string                 `protobuf:"bytes,1,opt,name=downstream_addr,json=downstreamAddr,proto3" json:"downstream_addr,omitempty"` // where this worker should push to
+	DownstreamAddr string                 `protobuf:"bytes,1,opt,name=downstream_addr,json=downstreamAddr,proto3" json:"downstream_addr,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -279,6 +279,110 @@ func (x *Ack) GetReason() string {
 	return ""
 }
 
+type AckBarrierReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          StageKind              `protobuf:"varint,1,opt,name=kind,proto3,enum=control.StageKind" json:"kind,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Epoch         int64                  `protobuf:"varint,3,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AckBarrierReq) Reset() {
+	*x = AckBarrierReq{}
+	mi := &file_control_control_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckBarrierReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckBarrierReq) ProtoMessage() {}
+
+func (x *AckBarrierReq) ProtoReflect() protoreflect.Message {
+	mi := &file_control_control_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckBarrierReq.ProtoReflect.Descriptor instead.
+func (*AckBarrierReq) Descriptor() ([]byte, []int) {
+	return file_control_control_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AckBarrierReq) GetKind() StageKind {
+	if x != nil {
+		return x.Kind
+	}
+	return StageKind_STAGE_KIND_UNSPECIFIED
+}
+
+func (x *AckBarrierReq) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AckBarrierReq) GetEpoch() int64 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+type AckBarrierResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AckBarrierResp) Reset() {
+	*x = AckBarrierResp{}
+	mi := &file_control_control_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckBarrierResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckBarrierResp) ProtoMessage() {}
+
+func (x *AckBarrierResp) ProtoReflect() protoreflect.Message {
+	mi := &file_control_control_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckBarrierResp.ProtoReflect.Descriptor instead.
+func (*AckBarrierResp) Descriptor() ([]byte, []int) {
+	return file_control_control_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AckBarrierResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 var File_control_control_proto protoreflect.FileDescriptor
 
 const file_control_control_proto_rawDesc = "" +
@@ -294,16 +398,24 @@ const file_control_control_proto_rawDesc = "" +
 	"\x05epoch\x18\x01 \x01(\x03R\x05epoch\"-\n" +
 	"\x03Ack\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason*\x9a\x01\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"]\n" +
+	"\rAckBarrierReq\x12&\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x12.control.StageKindR\x04kind\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x14\n" +
+	"\x05epoch\x18\x03 \x01(\x03R\x05epoch\" \n" +
+	"\x0eAckBarrierResp\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok*\x9a\x01\n" +
 	"\tStageKind\x12\x1a\n" +
 	"\x16STAGE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11STAGE_KIND_SOURCE\x10\x01\x12\x15\n" +
 	"\x11STAGE_KIND_FILTER\x10\x02\x12\x17\n" +
 	"\x13STAGE_KIND_TOKENIZE\x10\x03\x12\x15\n" +
 	"\x11STAGE_KIND_WCOUNT\x10\x04\x12\x13\n" +
-	"\x0fSTAGE_KIND_SINK\x10\x0527\n" +
+	"\x0fSTAGE_KIND_SINK\x10\x052v\n" +
 	"\bRegistry\x12+\n" +
-	"\bRegister\x12\x0e.control.Hello\x1a\x0f.control.Config2:\n" +
+	"\bRegister\x12\x0e.control.Hello\x1a\x0f.control.Config\x12=\n" +
+	"\n" +
+	"AckBarrier\x12\x16.control.AckBarrierReq\x1a\x17.control.AckBarrierResp2:\n" +
 	"\x06Worker\x120\n" +
 	"\x0eReceiveBarrier\x12\x10.control.Barrier\x1a\f.control.AckBBZ@github.com/knakatasf/wiki-river/internal/proto/control;controlpbb\x06proto3"
 
@@ -320,25 +432,30 @@ func file_control_control_proto_rawDescGZIP() []byte {
 }
 
 var file_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_control_control_proto_goTypes = []any{
-	(StageKind)(0),  // 0: control.StageKind
-	(*Hello)(nil),   // 1: control.Hello
-	(*Config)(nil),  // 2: control.Config
-	(*Barrier)(nil), // 3: control.Barrier
-	(*Ack)(nil),     // 4: control.Ack
+	(StageKind)(0),         // 0: control.StageKind
+	(*Hello)(nil),          // 1: control.Hello
+	(*Config)(nil),         // 2: control.Config
+	(*Barrier)(nil),        // 3: control.Barrier
+	(*Ack)(nil),            // 4: control.Ack
+	(*AckBarrierReq)(nil),  // 5: control.AckBarrierReq
+	(*AckBarrierResp)(nil), // 6: control.AckBarrierResp
 }
 var file_control_control_proto_depIdxs = []int32{
 	0, // 0: control.Hello.kind:type_name -> control.StageKind
-	1, // 1: control.Registry.Register:input_type -> control.Hello
-	3, // 2: control.Worker.ReceiveBarrier:input_type -> control.Barrier
-	2, // 3: control.Registry.Register:output_type -> control.Config
-	4, // 4: control.Worker.ReceiveBarrier:output_type -> control.Ack
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 1: control.AckBarrierReq.kind:type_name -> control.StageKind
+	1, // 2: control.Registry.Register:input_type -> control.Hello
+	5, // 3: control.Registry.AckBarrier:input_type -> control.AckBarrierReq
+	3, // 4: control.Worker.ReceiveBarrier:input_type -> control.Barrier
+	2, // 5: control.Registry.Register:output_type -> control.Config
+	6, // 6: control.Registry.AckBarrier:output_type -> control.AckBarrierResp
+	4, // 7: control.Worker.ReceiveBarrier:output_type -> control.Ack
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_control_control_proto_init() }
@@ -352,7 +469,7 @@ func file_control_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_control_control_proto_rawDesc), len(file_control_control_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
