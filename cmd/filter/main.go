@@ -152,7 +152,7 @@ func main() {
 	//	- goroutine B: read from srv.inCh, apply operatorFn, send results to downstream
 	// Backpressure: if downstream is slow, push.Send will block; plus inCh is bounded
 
-	// goroutine A: serve gRPC
+	// goroutine A: receive gRPC from the downstream
 	go func() {
 		if err := gs.Serve(ln); err != nil {
 			log.Fatalf("failed to serve: %v", err)

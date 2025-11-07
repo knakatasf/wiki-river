@@ -32,8 +32,7 @@ go run ./cmd/controller --addr=:7001 \
 source:
 ROLE=SOURCE go run ./cmd/source \
 --controller=127.0.0.1:7001 \
---sse-url=https://stream.wikimedia.org/v2/stream/recentchange \
---wiki=enwiki
+--sse-url=https://stream.wikimedia.org/v2/stream/recentchange
 
 filter:
 ROLE=FILTER go run ./cmd/filter --addr=:7102 --controller=127.0.0.1:7001
