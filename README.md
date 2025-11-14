@@ -56,3 +56,33 @@ SELECT window_id, wiki, word, count
 FROM word_counts
 ORDER BY count DESC
 LIMIT 20;
+
+Controller-1:
+go run ./cmd/controller \
+--addr=:7001 \
+--node-id=ctrl-1 \
+--raft-bind=127.0.0.1:9001 \
+--raft-dir=./data/ctrl-1 \
+--raft-bootstrap=true \
+--http-addr=:7100
+
+Controller-2:
+go run ./cmd/controller \
+--addr=:7002 \
+--node-id=ctrl-2 \
+--raft-bind=127.0.0.1:9002 \
+--raft-dir=./data/ctrl-2 \
+--raft-bootstrap=false \
+--http-addr=:7106 \
+--join=http://127.0.0.1:7100
+
+Controller-3:
+go run ./cmd/controller \
+--addr=:7003 \
+--node-id=ctrl-3 \
+--raft-bind=127.0.0.1:9003 \
+--raft-dir=./data/ctrl-3 \
+--raft-bootstrap=false \
+--http-addr=:7107 \
+--join=http://127.0.0.1:7100
+

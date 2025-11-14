@@ -17,6 +17,14 @@ import (
 
 const queueCap = 1000 // backpressure: bounded queue
 
+var redundant = map[string]struct{}{
+	"a": {}, "an": {}, "the": {},
+	"of": {}, "in": {}, "on": {}, "at": {},
+	"to": {}, "for": {}, "from": {}, "by": {}, "with": {},
+	"and": {}, "or": {}, "but": {},
+	"as": {}, "so": {},
+}
+
 type stageServer struct {
 	streampb.UnimplementedStageServer
 
@@ -53,6 +61,11 @@ func operatorFn(rec *streampb.Record) []*streampb.Record {
 		if w == "" {
 			continue
 		}
+
+		if _, skip := redundant[w]; skip {
+			continue
+		}
+
 		c := *rec
 		c.Word = w
 		out = append(out, &c)

@@ -2,72 +2,63 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net"
-	"sync"
+	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	controlpb "github.com/knakatasf/wiki-river/internal/proto/control"
+	raftctrl "github.com/knakatasf/wiki-river/internal/raftctrl"
 )
 
 var epoch int64
 
-type registry struct {
-	mu   sync.RWMutex
-	data map[string]regEntry
-}
-type regEntry struct {
-	Kind controlpb.StageKind
-	ID   string
-	Addr string
-	Time time.Time
-}
-
 type server struct {
 	controlpb.UnimplementedRegistryServer
 
-	reg *registry
+	node *raftctrl.Node
 
-	sourceNext   string
-	filterNext   string
-	tokenizeNext string
-	wcountNext   string
-
-	muAcks sync.Mutex
-	// { epoch: { KIND:ID: { *placeholder* } } }
-	expected map[int64]map[string]struct{}
-	received map[int64]map[string]struct{}
+	// hard-coded pipeline for now
+	sourceNext   string // -> filter
+	filterNext   string // -> tokenize
+	tokenizeNext string // -> wcount
+	wcountNext   string // -> sink
 }
 
-func newServer(sourceNext, filterNext, tokenizeNext, wcountNext string) *server {
+func newServer(node *raftctrl.Node, sourceNext, filterNext, tokenizeNext, wcountNext string) *server {
 	return &server{
-		reg:          &registry{data: make(map[string]regEntry)},
+		node:         node,
 		sourceNext:   sourceNext,
 		filterNext:   filterNext,
 		tokenizeNext: tokenizeNext,
 		wcountNext:   wcountNext,
-		expected:     make(map[int64]map[string]struct{}),
-		received:     make(map[int64]map[string]struct{}),
 	}
 }
 
-// each node as client calls this method indirecly
+// each worker node as client calls this method indirectly
 func (s *server) Register(ctx context.Context, hello *controlpb.Hello) (*controlpb.Config, error) {
-	key := fmt.Sprintf("%s:%s", hello.GetKind().String(), hello.GetId())
-
-	s.reg.mu.Lock()
-	s.reg.data[key] = regEntry{
-		Kind: hello.GetKind(),
-		ID:   hello.GetId(),
-		Addr: hello.GetAddr(),
-		Time: time.Now(),
+	// Only the Raft leader should accept state mutations
+	if s.node.Raft.State() != raft.Leader {
+		return nil, status.Error(codes.FailedPrecondition, "not leader")
 	}
-	s.reg.mu.Unlock()
+
+	kindStr := hello.GetKind().String()
+	key := fmt.Sprintf("%s:%s", kindStr, hello.GetId())
+
+	// Replicate registration via Raft
+	if err := s.node.ApplyRegister(kindStr, hello.GetId(), hello.GetAddr()); err != nil {
+		return nil, status.Errorf(codes.Internal, "raft apply register for %s: %v", key, err)
+	}
 
 	var downstream string
 	switch hello.GetKind() {
@@ -80,7 +71,7 @@ func (s *server) Register(ctx context.Context, hello *controlpb.Hello) (*control
 	case controlpb.StageKind_STAGE_KIND_WCOUNT:
 		downstream = s.wcountNext
 	case controlpb.StageKind_STAGE_KIND_SINK:
-		downstream = ""
+		downstream = "" // terminal
 	default:
 		downstream = ""
 	}
@@ -91,103 +82,239 @@ func (s *server) Register(ctx context.Context, hello *controlpb.Hello) (*control
 	return &controlpb.Config{DownstreamAddr: downstream}, nil
 }
 
+// each node except source will call this service method
+func (s *server) AckBarrier(ctx context.Context, in *controlpb.AckBarrierReq) (*controlpb.AckBarrierResp, error) {
+	// Only leader should take writes
+	if s.node.Raft.State() != raft.Leader {
+		return nil, status.Error(codes.FailedPrecondition, "not leader")
+	}
+
+	kindStr := in.GetKind().String()
+	key := fmt.Sprintf("%s:%s", kindStr, in.GetId())
+
+	// replicate ACK via Raft
+	if err := s.node.ApplyAck(kindStr, in.GetId(), in.GetEpoch()); err != nil {
+		return nil, status.Errorf(codes.Internal, "raft apply ack for %s: %v", key, err)
+	}
+
+	// Compute how many workers have acked this epoch, and how many workers exist.
+	got := s.node.FSM.AckCount(in.GetEpoch())
+
+	regSnap := s.node.FSM.RegistrySnapshot()
+	need := 0
+	for k := range regSnap {
+		if strings.HasPrefix(k, controlpb.StageKind_STAGE_KIND_SOURCE.String()+":") {
+			continue
+		}
+		need++
+	}
+
+	log.Printf("[CTRL  ] ack epoch=%d %s (%d/%d)", in.GetEpoch(), key, got, need)
+	if need > 0 && got >= need {
+		log.Printf("[CTRL  ] epoch=%d COMPLETE (%d/%d)", in.GetEpoch(), got, need)
+	}
+
+	return &controlpb.AckBarrierResp{Ok: true}, nil
+}
+
+// leader-only: issues barriers every 30s based on the FSM registry
 func (s *server) startBarrierTicker() {
 	t := time.NewTicker(30 * time.Second)
 	go func() {
 		defer t.Stop()
-		for range t.C { // Every 30 seconds
+		for range t.C {
+			// only leader issues barriers
+			if s.node.Raft.State() != raft.Leader {
+				continue
+			}
+
 			k := atomic.AddInt64(&epoch, 1)
 
-			snap := make(map[string]struct{})
-			s.reg.mu.RLock()
-			for _, e := range s.reg.data {
-				// Populate expected dict with all the nodes except source
-				if e.Kind != controlpb.StageKind_STAGE_KIND_SOURCE && e.Addr != "" {
-					key := fmt.Sprintf("%s:%s", e.Kind.String(), e.ID)
-					snap[key] = struct{}{} // this is just a placeholder, empty struct
+			// snapshot registry from FSM
+			regSnap := s.node.FSM.RegistrySnapshot()
+
+			type srcInfo struct {
+				ID   string
+				Addr string
+			}
+			var sources []srcInfo
+			workerCount := 0
+
+			for key, addr := range regSnap {
+				if addr == "" {
+					continue
+				}
+				parts := strings.SplitN(key, ":", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				kindStr, id := parts[0], parts[1]
+
+				if kindStr == controlpb.StageKind_STAGE_KIND_SOURCE.String() {
+					sources = append(sources, srcInfo{ID: id, Addr: addr})
+				} else {
+					workerCount++
 				}
 			}
-			s.reg.mu.RUnlock()
 
-			s.muAcks.Lock()
-			s.expected[k] = snap
-			s.received[k] = make(map[string]struct{})
-			s.muAcks.Unlock()
+			log.Printf("[CTRL  ] issue barrier epoch=%d to %d source(s), workers=%d",
+				k, len(sources), workerCount)
 
-			s.reg.mu.RLock()
-			var targets []regEntry // This is actually just one node to be registered
-			for _, e := range s.reg.data {
-				if e.Kind == controlpb.StageKind_STAGE_KIND_SOURCE && e.Addr != "" {
-					targets = append(targets, e)
-				}
-			}
-			s.reg.mu.RUnlock()
-
-			log.Printf("[CTRL  ] issue barrier epoch=%d to %d source(s)", k, len(targets))
-			for _, e := range targets {
-				go func(e regEntry) { // don't want to block so use go routine
+			for _, src := range sources {
+				go func(src srcInfo) {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 
-					conn, err := grpc.DialContext(ctx, e.Addr, grpc.WithInsecure(), grpc.WithBlock())
+					conn, err := grpc.DialContext(ctx, src.Addr, grpc.WithInsecure(), grpc.WithBlock())
 					if err != nil {
-						log.Printf("[CTRL  ] epoch=%d source=%s dial err: %v", k, e.ID, err)
+						log.Printf("[CTRL  ] epoch=%d source=%s dial err: %v", k, src.ID, err)
 						return
 					}
 					defer conn.Close()
 
 					wc := controlpb.NewWorkerClient(conn)
-					// ReceiveBarrier() actually sends a barrier to the source node
 					if _, err := wc.ReceiveBarrier(context.Background(), &controlpb.Barrier{Epoch: k}); err != nil {
-						log.Printf("[CTRL  ] epoch=%d source=%s rpc err: %v", k, e.ID, err)
+						log.Printf("[CTRL  ] epoch=%d source=%s rpc err: %v", k, src.ID, err)
 						return
 					}
-					log.Printf("[CTRL  ] epoch=%d delivered to source=%s", k, e.ID)
-				}(e)
+					log.Printf("[CTRL  ] epoch=%d delivered to source=%s", k, src.ID)
+				}(src)
 			}
 		}
 	}()
 }
 
-// each node except source will call this service method
-func (s *server) AckBarrier(ctx context.Context, in *controlpb.AckBarrierReq) (*controlpb.AckBarrierResp, error) {
-	key := fmt.Sprintf("%s:%s", in.GetKind().String(), in.GetId()) // KIND:ID like SINK:S1
+/*
+   --- Raft Join plumbing (HTTP) ---
+*/
 
-	s.muAcks.Lock()
-	defer s.muAcks.Unlock()
+// payload used by /join
+type joinRequest struct {
+	ID   string `json:"id"`   // node-id, e.g. "ctrl-2"
+	Addr string `json:"addr"` // raft-bind, e.g. "127.0.0.1:9002"
+}
 
-	exp, ok := s.expected[in.GetEpoch()] // should return the placeholder struct {}
-	if !ok {
-		log.Printf("[CTRL  ] ack(epoch=%d) from %s (no expected set)", in.GetEpoch(), key)
-		return &controlpb.AckBarrierResp{Ok: true}, nil
+// startHTTPJoinServer starts a tiny HTTP server that exposes /join so other
+// controller nodes can ask this node (usually the leader) to AddVoter.
+func startHTTPJoinServer(node *raftctrl.Node, httpAddr string) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/join", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		if node.Raft.State() != raft.Leader {
+			http.Error(w, "not leader", http.StatusPreconditionFailed)
+			return
+		}
+
+		var req joinRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if req.ID == "" || req.Addr == "" {
+			http.Error(w, "id and addr required", http.StatusBadRequest)
+			return
+		}
+
+		f := node.Raft.AddVoter(
+			raft.ServerID(req.ID),
+			raft.ServerAddress(req.Addr),
+			0, 0,
+		)
+		if err := f.Error(); err != nil {
+			http.Error(w, fmt.Sprintf("AddVoter error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("[JOIN  ] added voter id=%s addr=%s", req.ID, req.Addr)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
+	})
+
+	go func() {
+		log.Printf("[HTTP ] join server listening on %s", httpAddr)
+		if err := http.ListenAndServe(httpAddr, mux); err != nil {
+			log.Fatalf("http join server: %v", err)
+		}
+	}()
+}
+
+// joinExistingCluster sends an HTTP POST /join to an existing controller
+// (which should be the current leader or at least a member) so it can
+// call AddVoter on our behalf.
+func joinExistingCluster(joinURL, nodeID, raftAddr string) error {
+	body, _ := json.Marshal(joinRequest{ID: nodeID, Addr: raftAddr})
+	req, err := http.NewRequest(http.MethodPost, joinURL, strings.NewReader(string(body)))
+	if err != nil {
+		return err
 	}
+	req.Header.Set("Content-Type", "application/json")
 
-	// ack is already received by controller (not likely happens...)
-	if _, already := s.received[in.GetEpoch()][key]; already {
-		return &controlpb.AckBarrierResp{Ok: true}, nil
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
 	}
-
-	s.received[in.GetEpoch()][key] = struct{}{}
-
-	got := len(s.received[in.GetEpoch()]) // how many acks received so far
-	need := len(exp)                      // expected number of acks
-	log.Printf("[CTRL  ] ack epoch=%d %s (%d/%d)", in.GetEpoch(), key, got, need)
-
-	if got == need {
-		log.Printf("[CTRL  ] epoch=%d COMPLETE (%d/%d)", in.GetEpoch(), got, need)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("join failed: %s", resp.Status)
 	}
-	return &controlpb.AckBarrierResp{Ok: true}, nil
+	return nil
 }
 
 func main() {
-	addr := flag.String("addr", ":7001", "controller listen address")
+	addr := flag.String("addr", ":7001", "controller gRPC listen address (for workers)")
 	filterAddr := flag.String("filter-addr", "127.0.0.1:7102", "filter service address")
 	tokenizeAddr := flag.String("tokenize-addr", "127.0.0.1:7103", "tokenize service address")
 	wcountAddr := flag.String("wcount-addr", "127.0.0.1:7104", "wcount service address")
 	sinkAddr := flag.String("sink-addr", "127.0.0.1:7105", "sink service address")
+
+	nodeID := flag.String("node-id", "ctrl-1", "raft node ID")
+	raftBind := flag.String("raft-bind", "127.0.0.1:9001", "raft bind address (host:port)")
+	raftDir := flag.String("raft-dir", "./data/ctrl-1", "raft data directory")
+	raftBootstrap := flag.Bool("raft-bootstrap", false, "bootstrap Raft cluster (first node only)")
+
+	httpAddr := flag.String("http-addr", ":7100", "HTTP join server address (host:port)")
+	joinURL := flag.String("join", "", "join URL for existing controller, e.g. http://127.0.0.1:7100/join")
+
 	flag.Parse()
 
-	s := newServer(*filterAddr, *tokenizeAddr, *wcountAddr, *sinkAddr)
+	// create Raft node
+	node, err := raftctrl.NewNode(raftctrl.Opts{
+		NodeID:    *nodeID,
+		RaftBind:  *raftBind,
+		DataDir:   *raftDir,
+		Bootstrap: *raftBootstrap,
+	})
+	if err != nil {
+		log.Fatalf("new raft node: %v", err)
+	}
+
+	// Start HTTP join server for *this* controller
+	startHTTPJoinServer(node, *httpAddr)
+
+	// If joinURL is provided and we are not bootstrapping, join existing cluster
+	if *joinURL != "" && !*raftBootstrap {
+		// ensure /join path is present
+		j := *joinURL
+		if !strings.HasSuffix(j, "/join") {
+			if strings.HasSuffix(j, "/") {
+				j = j + "join"
+			} else {
+				j = j + "/join"
+			}
+		}
+		if err := joinExistingCluster(j, *nodeID, *raftBind); err != nil {
+			log.Fatalf("join cluster: %v", err)
+		}
+		log.Printf("[CTRL  ] joined cluster via %s", j)
+	}
+
+	s := newServer(node, *filterAddr, *tokenizeAddr, *wcountAddr, *sinkAddr)
 
 	gs := grpc.NewServer()
 	controlpb.RegisterRegistryServer(gs, s)
@@ -200,10 +327,10 @@ func main() {
 	log.Printf("[CTRL  ] pipeline: source→%s → %s → %s → %s",
 		*filterAddr, *tokenizeAddr, *wcountAddr, *sinkAddr)
 
+	// start leader-only barrier ticker
 	s.startBarrierTicker()
 
 	if err := gs.Serve(ln); err != nil {
-
 		log.Fatalf("grpc serve: %v", err)
 	}
 }

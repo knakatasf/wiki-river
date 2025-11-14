@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/hashicorp/raft-boltdb"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 )
 
 type Opts struct {
@@ -30,7 +30,7 @@ func NewNode(o Opts) (*Node, error) {
 
 	cfg := raft.DefaultConfig()
 	cfg.LocalID = raft.ServerID(o.NodeID)
-	cfg.SnapshotInterval = 0 // no snapshots
+	//cfg.SnapshotInterval = 0 // no snapshots
 
 	addr, err := net.ResolveTCPAddr("tcp", o.RaftBind)
 	if err != nil {
@@ -58,13 +58,15 @@ func NewNode(o Opts) (*Node, error) {
 		return nil, err
 	}
 
+	// For now, the first controller boots a single-node cluster.
+	// Later, you can add AddVoter / Join logic to grow to 3 nodes.
 	if o.Bootstrap {
-		cfg := raft.Configuration{
+		conf := raft.Configuration{
 			Servers: []raft.Server{
 				{ID: raft.ServerID(o.NodeID), Address: transport.LocalAddr()},
 			},
 		}
-		r.BootstrapCluster(cfg)
+		_ = r.BootstrapCluster(conf)
 	}
 
 	return &Node{Raft: r, FSM: fsm}, nil
