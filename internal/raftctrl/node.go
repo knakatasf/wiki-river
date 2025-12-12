@@ -58,8 +58,7 @@ func NewNode(o Opts) (*Node, error) {
 		return nil, err
 	}
 
-	// For now, the first controller boots a single-node cluster.
-	// Later, you can add AddVoter / Join logic to grow to 3 nodes.
+	// For now, the first controller boots a single-node cluster
 	if o.Bootstrap {
 		conf := raft.Configuration{
 			Servers: []raft.Server{

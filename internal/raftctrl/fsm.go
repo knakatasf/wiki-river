@@ -37,6 +37,7 @@ type LogEntry struct {
 type ControllerState struct {
 	Registry map[string]string             // "KIND:ID" -> addr ("STAGE_KIND_FILTER:F1" → "127.0.0.1:7102")
 	WaitAcks map[int64]map[string]struct{} // epoch -> set("KIND:ID")
+	MaxEpoch int64                         // highest epoch we've seen in ACKs
 }
 
 // WaitAcks looks like
@@ -55,6 +56,7 @@ func NewFSM() *FSM {
 		State: &ControllerState{
 			Registry: make(map[string]string),
 			WaitAcks: make(map[int64]map[string]struct{}),
+			MaxEpoch: 0,
 		},
 	}
 }
@@ -85,6 +87,11 @@ func (f *FSM) Apply(logEntry *raft.Log) interface{} {
 			f.State.WaitAcks[v.Epoch] = set
 		}
 		set[key] = struct{}{}
+
+		// track highest epoch we have seen in committed ACKs
+		if v.Epoch > f.State.MaxEpoch {
+			f.State.MaxEpoch = v.Epoch
+		}
 	}
 	return nil
 }
@@ -114,6 +121,13 @@ func (f *FSM) AckCount(epoch int64) int {
 // No snapshots (keep it simple)
 func (f *FSM) Snapshot() (raft.FSMSnapshot, error) { return emptySnap{}, nil }
 func (f *FSM) Restore(io.ReadCloser) error         { return nil }
+
+func (f *FSM) LastEpoch() int64 {
+	if f == nil || f.State == nil {
+		return 0
+	}
+	return f.State.MaxEpoch
+}
 
 type emptySnap struct{}
 

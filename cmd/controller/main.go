@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 	raftctrl "github.com/knakatasf/wiki-river/internal/raftctrl"
 )
 
-var epoch int64
+// NOTE: epoch is now per-server, not a global var.
 
 type server struct {
 	controlpb.UnimplementedRegistryServer
@@ -33,6 +34,15 @@ type server struct {
 	filterNext   string // -> tokenize
 	tokenizeNext string // -> wcount
 	wcountNext   string // -> sink
+	sinkNext     string // terminal (unused)
+
+	// last issued barrier epoch, initialized from Raft FSM state
+	epoch int64
+
+	// local (non-replicated) tracking for logging Ack progress
+	seenMu    sync.Mutex
+	seen      map[int64]map[string]struct{} // epoch -> set("KIND:ID")
+	completed map[int64]bool                // epoch -> COMPLETE already logged?
 }
 
 func newServer(node *raftctrl.Node, sourceNext, filterNext, tokenizeNext, wcountNext string) *server {
@@ -42,6 +52,8 @@ func newServer(node *raftctrl.Node, sourceNext, filterNext, tokenizeNext, wcount
 		filterNext:   filterNext,
 		tokenizeNext: tokenizeNext,
 		wcountNext:   wcountNext,
+		seen:         make(map[int64]map[string]struct{}),
+		completed:    make(map[int64]bool),
 	}
 }
 
@@ -91,15 +103,24 @@ func (s *server) AckBarrier(ctx context.Context, in *controlpb.AckBarrierReq) (*
 
 	kindStr := in.GetKind().String()
 	key := fmt.Sprintf("%s:%s", kindStr, in.GetId())
+	epoch := in.GetEpoch()
 
-	// replicate ACK via Raft
-	if err := s.node.ApplyAck(kindStr, in.GetId(), in.GetEpoch()); err != nil {
+	// First: replicate ACK via Raft so FSM/MaxEpoch stay correct
+	if err := s.node.ApplyAck(kindStr, in.GetId(), epoch); err != nil {
 		return nil, status.Errorf(codes.Internal, "raft apply ack for %s: %v", key, err)
 	}
 
-	// Compute how many workers have acked this epoch, and how many workers exist.
-	got := s.node.FSM.AckCount(in.GetEpoch())
+	// Now: local progress tracking purely for logging
+	s.seenMu.Lock()
+	defer s.seenMu.Unlock()
 
+	set := s.seen[epoch]
+	if set == nil {
+		set = make(map[string]struct{})
+		s.seen[epoch] = set
+	}
+
+	// Compute how many workers (non-source) exist from FSM registry
 	regSnap := s.node.FSM.RegistrySnapshot()
 	need := 0
 	for k := range regSnap {
@@ -109,9 +130,23 @@ func (s *server) AckBarrier(ctx context.Context, in *controlpb.AckBarrierReq) (*
 		need++
 	}
 
-	log.Printf("[CTRL  ] ack epoch=%d %s (%d/%d)", in.GetEpoch(), key, got, need)
-	if need > 0 && got >= need {
-		log.Printf("[CTRL  ] epoch=%d COMPLETE (%d/%d)", in.GetEpoch(), got, need)
+	// If we've already seen an ACK from this worker for this epoch, just log duplicate
+	if _, already := set[key]; already {
+		got := len(set)
+		log.Printf("[CTRL  ] duplicate ack epoch=%d %s (%d/%d)", epoch, key, got, need)
+		return &controlpb.AckBarrierResp{Ok: true}, nil
+	}
+
+	// New ACK for this epoch
+	set[key] = struct{}{}
+	got := len(set)
+
+	log.Printf("[CTRL  ] ack epoch=%d %s (%d/%d)", epoch, key, got, need)
+
+	// Only log COMPLETE once per epoch
+	if !s.completed[epoch] && need > 0 && got >= need {
+		s.completed[epoch] = true
+		log.Printf("[CTRL  ] epoch=%d COMPLETE (%d/%d)", epoch, got, need)
 	}
 
 	return &controlpb.AckBarrierResp{Ok: true}, nil
@@ -128,7 +163,18 @@ func (s *server) startBarrierTicker() {
 				continue
 			}
 
-			k := atomic.AddInt64(&epoch, 1)
+			// 1) read the max epoch from Raft FSM
+			last := s.node.FSM.LastEpoch()
+			cur := atomic.LoadInt64(&s.epoch)
+
+			// 2) if this server's local epoch is behind FSM, catch up
+			if last > cur {
+				atomic.StoreInt64(&s.epoch, last)
+				cur = last
+			}
+
+			// 3) allocate the next epoch
+			k := atomic.AddInt64(&s.epoch, 1)
 
 			// snapshot registry from FSM
 			regSnap := s.node.FSM.RegistrySnapshot()

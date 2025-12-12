@@ -23,6 +23,9 @@ var redundant = map[string]struct{}{
 	"to": {}, "for": {}, "from": {}, "by": {}, "with": {},
 	"and": {}, "or": {}, "but": {},
 	"as": {}, "so": {},
+	"articles": {}, "description": {}, "wikidata": {},
+	"list": {}, "submissions": {}, "redirects": {},
+	"errors": {}, "sections": {},
 }
 
 type stageServer struct {
@@ -55,21 +58,47 @@ func operatorFn(rec *streampb.Record) []*streampb.Record {
 	if txt == "" {
 		txt = rec.GetComment()
 	}
-	words := strings.Fields(strings.ToLower(txt))
-	out := make([]*streampb.Record, 0, len(words))
-	for _, w := range words {
+
+	// tokenize to lowercase
+	rawWords := strings.Fields(strings.ToLower(txt))
+
+	// filter out empty / redundant words first
+	words := make([]string, 0, len(rawWords))
+	for _, w := range rawWords {
+		// optional: strip simple punctuation
+		w = strings.Trim(w, ".,!?;:\"'()[]{}")
+
 		if w == "" {
 			continue
 		}
-
 		if _, skip := redundant[w]; skip {
 			continue
 		}
+		if strings.HasPrefix(w, "category:") {
+			continue
+		}
+		words = append(words, w)
+	}
 
+	// capacity: unigrams + bigrams (approx)
+	out := make([]*streampb.Record, 0, len(words)*2)
+
+	// 1) unigrams
+	for _, w := range words {
 		c := *rec
 		c.Word = w
 		out = append(out, &c)
 	}
+
+	// 2) bigrams (adjacent pairs)
+	for i := 0; i+1 < len(words); i++ {
+		bigram := words[i] + " " + words[i+1]
+
+		c := *rec
+		c.Word = bigram
+		out = append(out, &c)
+	}
+
 	return out
 }
 

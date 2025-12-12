@@ -1,63 +1,48 @@
-# init go module
-go mod init github.com/knakata/rivulet
+Wiki River is a distributed streaming system that processes real-time Wikipedia RecentChange events. 
+The system ingests the live SSE stream, filters and tokenizes titles and comments, and performs word counting.
+These workers—source, filter, tokenize, wcount, and sink—are coordinated by a three-node Raft controller cluster, 
+which manages routing and ensures reliable delivery between stages. 
+The final aggregated word counts are stored in SQLite for inspection and analysis.
 
+![img.png](img.png)
+
+# Installation
+
+### Install protocol buffers
+```
 brew install protobuf
+```
 
-# Go plugins for protobuf + gRPC
+### Go plugins for protobuf and gRPC
+```
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+```
 
-# make sure $GOBIN is on PATH so 'protoc' can find the plugins
+### Ensure $GOBIN is on your PATH:
+```
 export PATH="$(go env GOPATH)/bin:$PATH"
+```
 
-# Add runtime deps you’ll definitely use
-go get google.golang.org/grpc@latest
-go get google.golang.org/protobuf@latest
+### Install Go dependencies
+```
+go mod tidy
+```
 
-# Make sure your codegen tools are installed and on PATH:
-# go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-# go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-
+### Generate all .pb.go files
+```
 make proto
-
+```
 
 # how to run
-controller:
-go run ./cmd/controller --addr=:7001 \
---filter-addr=127.0.0.1:7102 \
---tokenize-addr=127.0.0.1:7103 \
---wcount-addr=127.0.0.1:7104 \
---sink-addr=127.0.0.1:7105
 
-source:
-ROLE=SOURCE go run ./cmd/source \
---controller=127.0.0.1:7001 \
---sse-url=https://stream.wikimedia.org/v2/stream/recentchange
+### Before running the system, reset the logs
+```
+rm -rf ./data/ctrl-1 ./data/ctrl-2 ./data/ctrl-3
+```
 
-filter:
-ROLE=FILTER go run ./cmd/filter --addr=:7102 --controller=127.0.0.1:7001
-
-tokenize:
-ROLE=TOKENIZE go run ./cmd/tokenize --addr=:7103 --controller=127.0.0.1:7001
-
-wcount:
-ROLE=WCOUNT go run ./cmd/wcount   --addr=:7104 --controller=127.0.0.1:7001
-
-sink:
-ROLE=SINK go run ./cmd/sink --addr=:7105 --controller=127.0.0.1:7001 --db=results.db
-
-sqlite:
-sqlite3 results.db
-DELETE FROM word_counts;
-VACUUM;
-.exit
-
-SELECT window_id, wiki, word, count
-FROM word_counts
-ORDER BY count DESC
-LIMIT 20;
-
-Controller-1:
+### Controller 1 (bootstrap)
+```
 go run ./cmd/controller \
 --addr=:7001 \
 --node-id=ctrl-1 \
@@ -65,8 +50,10 @@ go run ./cmd/controller \
 --raft-dir=./data/ctrl-1 \
 --raft-bootstrap=true \
 --http-addr=:7100
+```
 
-Controller-2:
+### Controller 2
+```
 go run ./cmd/controller \
 --addr=:7002 \
 --node-id=ctrl-2 \
@@ -75,8 +62,10 @@ go run ./cmd/controller \
 --raft-bootstrap=false \
 --http-addr=:7106 \
 --join=http://127.0.0.1:7100
+```
 
-Controller-3:
+### Controller 3
+```
 go run ./cmd/controller \
 --addr=:7003 \
 --node-id=ctrl-3 \
@@ -85,4 +74,44 @@ go run ./cmd/controller \
 --raft-bootstrap=false \
 --http-addr=:7107 \
 --join=http://127.0.0.1:7100
+```
 
+### Sink
+```
+ROLE=SINK go run ./cmd/sink --addr=:7105 --controller=127.0.0.1:7001 --db=results.db
+```
+
+### Count
+```
+ROLE=WCOUNT go run ./cmd/wcount   --addr=:7104 --controller=127.0.0.1:7001
+```
+
+### Tokenize
+```
+ROLE=TOKENIZE go run ./cmd/tokenize --addr=:7103 --controller=127.0.0.1:7001
+```
+
+### Filter
+```
+ROLE=FILTER go run ./cmd/filter --addr=:7102 --controller=127.0.0.1:7001
+```
+
+### Source
+```
+ROLE=SOURCE go run ./cmd/source \
+--controller=127.0.0.1:7001 \
+--sse-url=https://stream.wikimedia.org/v2/stream/recentchange
+```
+
+## Show Result
+```
+sqlite3 results.db
+```
+
+## Query
+```
+SELECT word, count
+FROM word_counts
+ORDER BY count DESC
+LIMIT 20;
+```
